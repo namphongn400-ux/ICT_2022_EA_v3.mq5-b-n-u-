@@ -1,161 +1,411 @@
-/ This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
 // © LuxAlgo
 
-//@version=6
-indicator("Smart Money Concepts - Order Blocks [LuxAlgo]", overlay = true, max_boxes_count = 500, max_lines_count = 500)
+//@version=5
+indicator('Smart Money Concepts [LuxAlgo]', 'LuxAlgo - Smart Money Concepts', overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500)
+//---------------------------------------------------------------------------------------------------------------------}
+//CONSTANTS & STRINGS & INPUTS
+//---------------------------------------------------------------------------------------------------------------------{
+BULLISH_LEG                     = 1
+BEARISH_LEG                     = 0
 
-// --- Group: Core Settings ---
-int length = input.int(5, "Swing Length", group = "Structure")
-color strongObBullColor = input.color(color.new(#089981, 70), "Strong Bull OB", group = "Style")
-color strongObBearColor = input.color(color.new(#f23645, 70), "Strong Bear OB", group = "Style")
-color weakObBullColor   = input.color(color.new(#089981, 90), "Weak Bull OB", group = "Style")
-color weakObBearColor   = input.color(color.new(#f23645, 90), "Weak Bear OB", group = "Style")
+BULLISH                         = +1
+BEARISH                         = -1
 
-// --- Swing Points ---
-float ph = ta.pivothigh(high, length, length)
-float pl = ta.pivotlow(low, length, length)
+GREEN                           = #089981
+RED                             = #F23645
+BLUE                            = #2157f3
+GRAY                            = #878b94
+MONO_BULLISH                    = #b2b5be
+MONO_BEARISH                    = #5d606b
 
-var float lastPh = na
-var float lastPl = na
-var int lastPhIndex = na
-var int lastPlIndex = na
+HISTORICAL                      = 'Historical'
+PRESENT                         = 'Present'
 
-if not na(ph)
-    lastPh := ph
-    lastPhIndex := bar_index[length]
-if not na(pl)
-    lastPl := pl
-    lastPlIndex := bar_index[length]
+COLORED                         = 'Colored'
+MONOCHROME                      = 'Monochrome'
 
-// --- Trend and Structure ---
-var int trend = 0 // 1 for bull, -1 for bear
-var bool isChoch = false
-var bool isBos = false
+ALL                             = 'All'
+BOS                             = 'BOS'
+CHOCH                           = 'CHoCH'
 
-float lastHigh = na
-float lastLow = na
+TINY                            = size.tiny
+SMALL                           = size.small
+NORMAL                          = size.normal
 
-// Simplified structure logic
-if close > lastPh and trend <= 0
-    trend := 1
-    isChoch := trend == -1 ? true : false
-    isBos := trend == 0 ? true : false
-else if close < lastPl and trend >= 0
-    trend := -1
-    isChoch := trend == 1 ? true : false
-    isBos := trend == 0 ? true : false
-else
-    isChoch := false
-    isBos := false
+ATR                             = 'Atr'
+RANGE                           = 'Cumulative Mean Range'
 
-if close > lastPh and trend == 1
-    isBos := true
-if close < lastPl and trend == -1
-    isBos := true
+CLOSE                           = 'Close'
+HIGHLOW                         = 'High/Low'
 
-// --- Premium / Discount ---
-var float waveHigh = na
-var float waveLow = na
+SMART_GROUP                     = 'Smart Money Concepts'
+INTERNAL_GROUP                  = 'Real Time Internal Structure'
+BLOCKS_GROUP                    = 'Order Blocks'
+GAPS_GROUP                      = 'Fair Value Gaps'
+ZONES_GROUP                     = 'Premium & Discount Zones'
 
-if trend == 1
-    waveHigh := high
-    waveLow := lastPl
-else if trend == -1
-    waveLow := low
-    waveHigh := lastPh
+modeTooltip                     = 'Allows to display historical Structure or only the recent ones'
+styleTooltip                    = 'Indicator color theme'
+showTrendTooltip                = 'Display additional candles with a color reflecting the current trend detected by structure'
+showInternalsTooltip            = 'Display internal market structure'
+internalFilterConfluenceTooltip = 'Filter non significant internal structure breakouts'
+showInternalOrderBlocksTooltip  = 'Display internal order blocks on the chart\n\nNumber of internal order blocks to display on the chart'
+orderBlockFilterTooltip         = 'Method used to filter out volatile order blocks \n\nIt is recommended to use the cumulative mean range method when a low amount of data is available'
+orderBlockMitigationTooltip     = 'Select what values to use for order block mitigation'
+showFairValueGapsTooltip        = 'Display fair values gaps on the chart'
+fairValueGapsThresholdTooltip   = 'Filter out non significant fair value gaps'
+fairValueGapsTimeframeTooltip   = 'Fair value gaps timeframe'
+fairValueGapsExtendTooltip      = 'Determine how many bars to extend the Fair Value Gap boxes on chart'
+showPremiumDiscountZonesTooltip = 'Display premium, discount, and equilibrium zones on chart'
 
-float eqLevel = waveLow + (waveHigh - waveLow) * 0.5
-bool inDiscount = close < eqLevel
-bool inPremium = close > eqLevel
+modeInput                       = input.string( HISTORICAL, 'Mode',                     group = SMART_GROUP,    tooltip = modeTooltip, options = [HISTORICAL, PRESENT])
+styleInput                      = input.string( COLORED,    'Style',                    group = SMART_GROUP,    tooltip = styleTooltip,options = [COLORED, MONOCHROME])
+showTrendInput                  = input(        false,      'Color Candles',            group = SMART_GROUP,    tooltip = showTrendTooltip)
 
-// --- Order Blocks ---
-type OrderBlock
+showInternalsInput              = input(        true,       'Show Internal Structure',  group = INTERNAL_GROUP, tooltip = showInternalsTooltip)
+showInternalBullInput           = input.string( ALL,        'Bullish Structure',        group = INTERNAL_GROUP, inline = 'ibull', options = [ALL,BOS,CHOCH])
+internalBullColorInput          = input(        GREEN,      '',                         group = INTERNAL_GROUP, inline = 'ibull')
+showInternalBearInput           = input.string( ALL,        'Bearish Structure' ,       group = INTERNAL_GROUP, inline = 'ibear', options = [ALL,BOS,CHOCH])
+internalBearColorInput          = input(        RED,        '',                         group = INTERNAL_GROUP, inline = 'ibear')
+internalFilterConfluenceInput   = input(        false,      'Confluence Filter',        group = INTERNAL_GROUP, tooltip = internalFilterConfluenceTooltip)
+internalStructureSize           = input.string( TINY,       'Internal Label Size',      group = INTERNAL_GROUP, options = [TINY,SMALL,NORMAL])
+
+showInternalOrderBlocksInput    = input(        true,       'Internal Order Blocks',    group = BLOCKS_GROUP,   tooltip = showInternalOrderBlocksTooltip,   inline = 'iob')
+internalOrderBlocksSizeInput    = input.int(    5,          '',                         group = BLOCKS_GROUP,   minval = 1, maxval = 20,                    inline = 'iob')
+orderBlockFilterInput           = input.string( 'Atr',      'Order Block Filter',       group = BLOCKS_GROUP,   tooltip = orderBlockFilterTooltip,          options = [ATR, RANGE])
+orderBlockMitigationInput       = input.string( HIGHLOW,    'Order Block Mitigation',   group = BLOCKS_GROUP,   tooltip = orderBlockMitigationTooltip,      options = [CLOSE,HIGHLOW])
+internalBullishOrderBlockColor  = input.color(color.new(#3179f5, 80), 'Internal Bullish OB',    group = BLOCKS_GROUP)
+internalBearishOrderBlockColor  = input.color(color.new(#f77c80, 80), 'Internal Bearish OB',    group = BLOCKS_GROUP)
+
+showFairValueGapsInput          = input(        false,      'Fair Value Gaps',          group = GAPS_GROUP,     tooltip = showFairValueGapsTooltip)
+fairValueGapsThresholdInput     = input(        true,       'Auto Threshold',           group = GAPS_GROUP,     tooltip = fairValueGapsThresholdTooltip)
+fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',                group = GAPS_GROUP,     tooltip = fairValueGapsTimeframeTooltip)
+fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG',   group = GAPS_GROUP)
+fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG',   group = GAPS_GROUP)
+fairValueGapsExtendInput        = input.int(    1,          'Extend FVG',               group = GAPS_GROUP,     tooltip = fairValueGapsExtendTooltip,       minval = 0)
+
+showPremiumDiscountZonesInput   = input(        false,      'Premium/Discount Zones',   group = ZONES_GROUP,    tooltip = showPremiumDiscountZonesTooltip)
+premiumZoneColorInput           = input.color(  RED,        'Premium Zone',             group = ZONES_GROUP)
+equilibriumZoneColorInput       = input.color(  GRAY,       'Equilibrium Zone',         group = ZONES_GROUP)
+discountZoneColorInput          = input.color(  GREEN,      'Discount Zone',            group = ZONES_GROUP)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//DATA STRUCTURES & VARIABLES
+//---------------------------------------------------------------------------------------------------------------------{
+type alerts
+    bool internalBullishBOS         = false
+    bool internalBearishBOS         = false
+    bool internalBullishCHoCH       = false
+    bool internalBearishCHoCH       = false
+    bool internalBullishOrderBlock  = false
+    bool internalBearishOrderBlock  = false
+    bool bullishFairValueGap        = false
+    bool bearishFairValueGap        = false
+
+type trailingExtremes
     float top
     float bottom
-    int left
-    int right
-    bool isBull
-    bool isStrong
-    bool mitigated
-    box obBox
-    float volumeVal
+    int barTime
+    int barIndex
+    int lastTopTime
+    int lastBottomTime
 
-var array<OrderBlock> obList = array.new<OrderBlock>()
+type fairValueGap
+    float top
+    float bottom
+    int bias
+    box topBox
+    box bottomBox
 
-// Function to find last opposite candle
-findLastOppositeCandle(isBull, startIndex) =>
-    float top = na
-    float bottom = na
-    float vol = na
-    int idx = bar_index
-    for i = 1 to 20
-        if isBull and close[i] < open[i]
-            top := high[i]
-            bottom := low[i]
-            vol := volume[i]
-            idx := bar_index[i]
-            break
-        else if not isBull and close[i] > open[i]
-            top := high[i]
-            bottom := low[i]
-            vol := volume[i]
-            idx := bar_index[i]
-            break
-    [top, bottom, idx, vol]
+type trend
+    int bias
 
-if isChoch or isBos
-    bool isBull = trend == 1
-    [obTop, obBottom, obIdx, obVol] = findLastOppositeCandle(isBull, bar_index)
+type pivot
+    float currentLevel
+    float lastLevel
+    bool crossed
+    int barTime     = time
+    int barIndex    = bar_index
+
+type orderBlock
+    float barHigh
+    float barLow
+    int barTime    
+    int bias
+
+var pivot internalHigh                      = pivot.new(na,na,false)
+var pivot internalLow                       = pivot.new(na,na,false)
+var trend internalTrend                     = trend.new(0)
+var array<fairValueGap> fairValueGaps       = array.new<fairValueGap>()
+var array<float> parsedHighs                = array.new<float>()
+var array<float> parsedLows                 = array.new<float>()
+var array<int> times                        = array.new<int>()
+var trailingExtremes trailing               = trailingExtremes.new()
+var array<orderBlock> internalOrderBlocks   = array.new<orderBlock>()
+var array<box> internalOrderBlocksBoxes     = array.new<box>()
+var bullishCandleColor                      = styleInput == MONOCHROME ? MONO_BULLISH : GREEN
+var bearishCandleColor                      = styleInput == MONOCHROME ? MONO_BEARISH : RED
+var fairValueGapBullishColor                = styleInput == MONOCHROME ? color.new(MONO_BULLISH,70) : fairValueGapsBullColorInput
+var fairValueGapBearishColor                = styleInput == MONOCHROME ? color.new(MONO_BEARISH,70) : fairValueGapsBearColorInput
+var premiumZoneColor                        = styleInput == MONOCHROME ? MONO_BEARISH : premiumZoneColorInput
+var discountZoneColor                       = styleInput == MONOCHROME ? MONO_BULLISH : discountZoneColorInput
+alerts currentAlerts                        = alerts.new()
+
+if barstate.isfirst
+    trailing.top            := high
+    trailing.bottom         := low
+    trailing.barTime        := time
+    trailing.barIndex       := bar_index
+    trailing.lastTopTime    := time
+    trailing.lastBottomTime := time
+    if showInternalOrderBlocksInput
+        for index = 1 to internalOrderBlocksSizeInput
+            internalOrderBlocksBoxes.push(box.new(na,na,na,na,xloc = xloc.bar_time,extend = extend.right))
+
+bearishOrderBlockMitigationSource   = orderBlockMitigationInput == CLOSE ? close : high
+bullishOrderBlockMitigationSource   = orderBlockMitigationInput == CLOSE ? close : low
+atrMeasure                          = ta.atr(200)
+volatilityMeasure                   = orderBlockFilterInput == ATR ? atrMeasure : ta.cum(ta.tr)/bar_index
+highVolatilityBar                   = (high - low) >= (2 * volatilityMeasure)
+parsedHigh                          = highVolatilityBar ? low : high
+parsedLow                           = highVolatilityBar ? high : low
+
+parsedHighs.push(parsedHigh)
+parsedLows.push(parsedLow)
+times.push(time)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//USER-DEFINED FUNCTIONS
+//---------------------------------------------------------------------------------------------------------------------{
+leg(int size) =>
+    var leg     = 0    
+    newLegHigh  = high[size] > ta.highest(size)
+    newLegLow   = low[size]  < ta.lowest(size)
     
-    // Filter Premium/Discount
-    bool validZone = isBull ? (obTop < eqLevel) : (obBottom > eqLevel)
-    
-    if not na(obTop) and validZone
-        color boxColor = na
-        if isBull
-            boxColor := isChoch ? strongObBullColor : weakObBullColor
+    if newLegHigh
+        leg := BEARISH_LEG
+    else if newLegLow
+        leg := BULLISH_LEG
+    leg
+
+startOfNewLeg(int leg)      => ta.change(leg) != 0
+startOfBearishLeg(int leg)  => ta.change(leg) == -1
+startOfBullishLeg(int leg)  => ta.change(leg) == +1
+
+getCurrentStructure(int size) =>
+    currentLeg  = leg(size)
+    newPivot    = startOfNewLeg(currentLeg)
+    pivotLow    = startOfBullishLeg(currentLeg)
+
+    if newPivot
+        if pivotLow
+            internalLow.lastLevel    := internalLow.currentLevel
+            internalLow.currentLevel := low[size]
+            internalLow.crossed      := false
+            internalLow.barTime      := time[size]
+            internalLow.barIndex     := bar_index[size]
         else
-            boxColor := isChoch ? strongObBearColor : weakObBearColor
-            
-        box newBox = box.new(obIdx, obTop, bar_index, obBottom, border_color = color.new(boxColor, 0), bgcolor = boxColor)
-        obList.push(OrderBlock.new(obTop, obBottom, obIdx, bar_index, isBull, isChoch, false, newBox, obVol))
+            internalHigh.lastLevel    := internalHigh.currentLevel
+            internalHigh.currentLevel := high[size]
+            internalHigh.crossed      := false
+            internalHigh.barTime      := time[size]
+            internalHigh.barIndex     := bar_index[size]
 
-// Mitigation Logic
-if array.size(obList) > 0
-    for i = array.size(obList) - 1 to 0
-        OrderBlock ob = array.get(obList, i)
-        if not ob.mitigated
-            ob.obBox.set_right(bar_index)
-            if ob.isBull and low < ob.top
-                ob.mitigated := true
-                ob.obBox.set_bgcolor(color.new(strongObBullColor, 95))
-            else if not ob.isBull and high > ob.bottom
-                ob.mitigated := true
-                ob.obBox.set_bgcolor(color.new(strongObBearColor, 95))
+drawStructure(pivot p_ivot, string tag, color structureColor, string lineStyle, string labelStyle, string labelSize) =>    
+    var line l_ine      = line.new(na,na,na,na,xloc = xloc.bar_time)
+    var label l_abel    = label.new(na,na)
 
-// --- Dashboard ---
-// MTF Trend Analysis
-f_get_trend(tf) =>
-    request.security(syminfo.tickerid, tf, close > ta.ema(close, 50) ? 1 : -1)
+    if modeInput == PRESENT
+        l_ine.delete()
+        l_abel.delete()
 
-t_m5  = f_get_trend("5")
-t_m15 = f_get_trend("15")
-t_h1  = f_get_trend("60")
-t_h4  = f_get_trend("240")
+    l_ine   := line.new(chart.point.new(p_ivot.barTime,na,p_ivot.currentLevel), chart.point.new(time,na,p_ivot.currentLevel), xloc.bar_time, color=structureColor, style=lineStyle)
+    l_abel  := label.new(chart.point.new(na,math.round(0.5*(p_ivot.barIndex+bar_index)),p_ivot.currentLevel), tag, xloc.bar_index, color=color(na), textcolor=structureColor, style=labelStyle, size = labelSize)
 
-var table dash = table.new(position.top_left, 2, 5, border_width = 1)
-if barstate.islast
-    table.cell(dash, 0, 0, "Timeframe", text_color = color.white, bgcolor = color.gray)
-    table.cell(dash, 1, 0, "Trend", text_color = color.white, bgcolor = color.gray)
-    
-    table.cell(dash, 0, 1, "M5", text_color = color.white, bgcolor = color.black)
-    table.cell(dash, 1, 1, t_m5 > 0 ? "BULL" : "BEAR", text_color = color.white, bgcolor = t_m5 > 0 ? color.green : color.red)
-    
-    table.cell(dash, 0, 2, "M15", text_color = color.white, bgcolor = color.black)
-    table.cell(dash, 1, 2, t_m15 > 0 ? "BULL" : "BEAR", text_color = color.white, bgcolor = t_m15 > 0 ? color.green : color.red)
-    
-    table.cell(dash, 0, 3, "H1", text_color = color.white, bgcolor = color.black)
-    table.cell(dash, 1, 3, t_h1 > 0 ? "BULL" : "BEAR", text_color = color.white, bgcolor = t_h1 > 0 ? color.green : color.red)
-    
-    table.cell(dash, 0, 4, "H4", text_color = color.white, bgcolor = color.black)
-    table.cell(dash, 1, 4, t_h4 > 0 ? "BULL" : "BEAR", text_color = color.white, bgcolor = t_h4 > 0 ? color.green : color.red)
+storeOrdeBlock(pivot p_ivot, int bias) =>
+    if showInternalOrderBlocksInput
+        array<float> a_rray = na
+        int parsedIndex     = na
+
+        if bias == BEARISH
+            a_rray      := parsedHighs.slice(p_ivot.barIndex,bar_index)
+            parsedIndex := p_ivot.barIndex + a_rray.indexof(a_rray.max())
+        else
+            a_rray      := parsedLows.slice(p_ivot.barIndex,bar_index)
+            parsedIndex := p_ivot.barIndex + a_rray.indexof(a_rray.min())
+
+        orderBlock o_rderBlock = orderBlock.new(parsedHighs.get(parsedIndex), parsedLows.get(parsedIndex), times.get(parsedIndex), bias)
+        
+        if internalOrderBlocks.size() >= 100
+            internalOrderBlocks.pop()
+        internalOrderBlocks.unshift(o_rderBlock)
+
+deleteOrderBlocks() =>
+    for [index,eachOrderBlock] in internalOrderBlocks
+        bool crossedOderBlock = false
+        
+        if bearishOrderBlockMitigationSource > eachOrderBlock.barHigh and eachOrderBlock.bias == BEARISH
+            crossedOderBlock := true
+            currentAlerts.internalBearishOrderBlock := true
+        else if bullishOrderBlockMitigationSource < eachOrderBlock.barLow and eachOrderBlock.bias == BULLISH
+            crossedOderBlock := true
+            currentAlerts.internalBullishOrderBlock := true
+        if crossedOderBlock
+            internalOrderBlocks.remove(index)
+
+drawOrderBlocks() =>
+    orderBlocksSize = internalOrderBlocks.size()
+
+    if orderBlocksSize > 0
+        array<orderBlock> parsedOrdeBlocks = internalOrderBlocks.slice(0, math.min(internalOrderBlocksSizeInput, orderBlocksSize))
+
+        for [index,eachOrderBlock] in parsedOrdeBlocks
+            orderBlockColor = styleInput == MONOCHROME ? (eachOrderBlock.bias == BEARISH ? color.new(MONO_BEARISH,80) : color.new(MONO_BULLISH,80)) : (eachOrderBlock.bias == BEARISH ? internalBearishOrderBlockColor : internalBullishOrderBlockColor)
+
+            box b_ox = internalOrderBlocksBoxes.get(index)
+            b_ox.set_top_left_point(    chart.point.new(eachOrderBlock.barTime,na,eachOrderBlock.barHigh))
+            b_ox.set_bottom_right_point(chart.point.new(last_bar_time,na,eachOrderBlock.barLow))
+            b_ox.set_border_color(      na)
+            b_ox.set_bgcolor(           orderBlockColor)
+
+displayStructure() =>
+    var bullishBar = true
+    var bearishBar = true
+
+    if internalFilterConfluenceInput
+        bullishBar := high - math.max(close, open) > math.min(close, open - low)
+        bearishBar := high - math.max(close, open) < math.min(close, open - low)
+
+    bullishColor = styleInput == MONOCHROME ? MONO_BULLISH : internalBullColorInput
+    bearishColor = styleInput == MONOCHROME ? MONO_BEARISH : internalBearColorInput
+
+    if ta.crossover(close, internalHigh.currentLevel) and not internalHigh.crossed and bullishBar
+        string tag = internalTrend.bias == BEARISH ? CHOCH : BOS
+
+        currentAlerts.internalBullishCHoCH := tag == CHOCH
+        currentAlerts.internalBullishBOS   := tag == BOS
+
+        internalHigh.crossed := true
+        internalTrend.bias   := BULLISH
+
+        displayCondition = showInternalsInput and (showInternalBullInput == ALL or (showInternalBullInput == BOS and tag != CHOCH) or (showInternalBullInput == CHOCH and tag == CHOCH))
+        if displayCondition
+            drawStructure(internalHigh, tag, bullishColor, line.style_dashed, label.style_label_down, internalStructureSize)
+        if showInternalOrderBlocksInput
+            storeOrdeBlock(internalHigh, BULLISH)
+
+    if ta.crossunder(close, internalLow.currentLevel) and not internalLow.crossed and bearishBar
+        string tag = internalTrend.bias == BULLISH ? CHOCH : BOS
+
+        currentAlerts.internalBearishCHoCH := tag == CHOCH
+        currentAlerts.internalBearishBOS   := tag == BOS
+
+        internalLow.crossed  := true
+        internalTrend.bias   := BEARISH
+
+        displayCondition = showInternalsInput and (showInternalBearInput == ALL or (showInternalBearInput == BOS and tag != CHOCH) or (showInternalBearInput == CHOCH and tag == CHOCH))
+        if displayCondition
+            drawStructure(internalLow, tag, bearishColor, line.style_dashed, label.style_label_up, internalStructureSize)
+        if showInternalOrderBlocksInput
+            storeOrdeBlock(internalLow, BEARISH)
+
+fairValueGapBox(leftTime, rightTime, topPrice, bottomPrice, boxColor) =>
+    box.new(chart.point.new(leftTime,na,topPrice), chart.point.new(rightTime + fairValueGapsExtendInput * (time-time[1]),na,bottomPrice), xloc=xloc.bar_time, border_color = boxColor, bgcolor = boxColor)
+
+deleteFairValueGaps() =>
+    for [index,eachFairValueGap] in fairValueGaps
+        if (low < eachFairValueGap.bottom and eachFairValueGap.bias == BULLISH) or (high > eachFairValueGap.top and eachFairValueGap.bias == BEARISH)
+            eachFairValueGap.topBox.delete()
+            eachFairValueGap.bottomBox.delete()
+            fairValueGaps.remove(index)
+
+drawFairValueGaps() =>
+    [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]], lookahead = barmerge.lookahead_on)
+
+    barDeltaPercent     = (lastClose - lastOpen) / (lastOpen * 100)
+    newTimeframe        = timeframe.change(fairValueGapsTimeframeInput)
+    threshold           = fairValueGapsThresholdInput ? ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0)) / bar_index * 2 : 0
+
+    bullishFairValueGap = currentLow > last2High and lastClose > last2High and barDeltaPercent > threshold and newTimeframe
+    bearishFairValueGap = currentHigh < last2Low and lastClose < last2Low and -barDeltaPercent > threshold and newTimeframe
+
+    if bullishFairValueGap
+        currentAlerts.bullishFairValueGap := true
+        fairValueGaps.unshift(fairValueGap.new(currentLow, last2High, BULLISH, fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),fairValueGapBullishColor), fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,fairValueGapBullishColor)))
+    if bearishFairValueGap
+        currentAlerts.bearishFairValueGap := true
+        fairValueGaps.unshift(fairValueGap.new(currentHigh, last2Low, BEARISH, fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),fairValueGapBearishColor), fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,fairValueGapBearishColor)))
+
+updateTrailingExtremes() =>
+    trailing.top := math.max(high, trailing.top)
+    if trailing.top == high
+        trailing.lastTopTime := time
+        trailing.barTime     := time
+        trailing.barIndex    := bar_index
+    trailing.bottom := math.min(low, trailing.bottom)
+    if trailing.bottom == low
+        trailing.lastBottomTime := time
+        trailing.barTime        := time
+        trailing.barIndex       := bar_index
+
+drawZone(float labelLevel, int labelIndex, float top, float bottom, string tag, color zoneColor, string style) =>
+    var label l_abel = label.new(na,na,text = tag, color=color(na),textcolor = zoneColor, style = style, size = size.small)
+    var box b_ox     = box.new(na,na,na,na,bgcolor = color.new(zoneColor,80),border_color = color(na), xloc = xloc.bar_time)
+
+    b_ox.set_top_left_point(    chart.point.new(trailing.barTime,na,top))
+    b_ox.set_bottom_right_point(chart.point.new(last_bar_time,na,bottom))
+    l_abel.set_point(           chart.point.new(na,labelIndex,labelLevel))
+
+drawPremiumDiscountZones() =>
+    drawZone(trailing.top, math.round(0.5*(trailing.barIndex + last_bar_index)), trailing.top, 0.95*trailing.top + 0.05*trailing.bottom, 'Premium', premiumZoneColor, label.style_label_down)
+
+    equilibriumLevel = math.avg(trailing.top, trailing.bottom)
+    drawZone(equilibriumLevel, last_bar_index, 0.525*trailing.top + 0.475*trailing.bottom, 0.525*trailing.bottom + 0.475*trailing.top, 'Equilibrium', equilibriumZoneColorInput, label.style_label_left)
+
+    drawZone(trailing.bottom, math.round(0.5*(trailing.barIndex + last_bar_index)), 0.95*trailing.bottom + 0.05*trailing.top, trailing.bottom, 'Discount', discountZoneColor, label.style_label_up)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//MUTABLE VARIABLES & EXECUTION
+//---------------------------------------------------------------------------------------------------------------------{
+parsedOpen  = showTrendInput ? open : na
+candleColor = internalTrend.bias == BULLISH ? bullishCandleColor : bearishCandleColor
+plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColor, bordercolor = candleColor)
+
+if showPremiumDiscountZonesInput
+    updateTrailingExtremes()
+    drawPremiumDiscountZones()
+
+if showFairValueGapsInput
+    deleteFairValueGaps()
+
+getCurrentStructure(5)
+
+if showInternalsInput or showInternalOrderBlocksInput or showTrendInput
+    displayStructure()
+
+if showInternalOrderBlocksInput
+    deleteOrderBlocks()
+
+if showFairValueGapsInput
+    drawFairValueGaps()
+
+if barstate.islastconfirmedhistory or barstate.islast
+    if showInternalOrderBlocksInput
+        drawOrderBlocks()
+
+//---------------------------------------------------------------------------------------------------------------------}
+//ALERTS
+//---------------------------------------------------------------------------------------------------------------------{
+alertcondition(currentAlerts.internalBullishBOS,        'Internal Bullish BOS',         'Internal Bullish BOS formed')
+alertcondition(currentAlerts.internalBullishCHoCH,      'Internal Bullish CHoCH',       'Internal Bullish CHoCH formed')
+alertcondition(currentAlerts.internalBearishBOS,        'Internal Bearish BOS',         'Internal Bearish BOS formed')
+alertcondition(currentAlerts.internalBearishCHoCH,      'Internal Bearish CHoCH',       'Internal Bearish CHoCH formed')
+
+alertcondition(currentAlerts.internalBullishOrderBlock, 'Bullish Internal OB Breakout', 'Price broke bullish internal OB')
+alertcondition(currentAlerts.internalBearishOrderBlock, 'Bearish Internal OB Breakout', 'Price broke bearish internal OB')
+
+alertcondition(currentAlerts.bullishFairValueGap,       'Bullish FVG',                  'Bullish FVG formed')
+alertcondition(currentAlerts.bearishFairValueGap,       'Bearish FVG',                  'Bearish FVG formed')
+
+//---------------------------------------------------------------------------------------------------------------------}
